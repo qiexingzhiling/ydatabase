@@ -8,3 +8,4 @@ pub mod options;
 mod util;
 mod db_tests;
 mod batch;
+mod merge;

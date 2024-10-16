@@ -37,5 +37,7 @@ pub enum Errors {
     EmptyKeyError,
     #[error("Invalid Key Error")]
     ExceedMaxBatchNum,
+    #[error("Merging is progressing,please try again later")]
+    MergingIsProgressing,
 }
 pub type Result<T> = result::Result<T, Errors>;

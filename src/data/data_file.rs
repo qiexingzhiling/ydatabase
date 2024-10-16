@@ -12,6 +12,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 pub const DATA_FILE_NAME_SUFFIX: &str = ".data";
+pub const HINT_FILE_NAME: &str = "hint-index";
+pub const MERGE_FINISH_FILE_NAME: &str = "merge-finished";
 
 pub struct DataFile {
     file_id: Arc<RwLock<u32>>,
@@ -25,6 +27,28 @@ impl DataFile {
 
         Ok(DataFile {
             file_id: Arc::new(RwLock::new(file_id)),
+            write_off: Arc::new(RwLock::new(0)),
+            io_manager: Box::new(io_manager),
+        })
+    }
+
+    pub fn new_hint_file(dir_path: PathBuf) -> Result<DataFile> {
+        let file_name= dir_path.join(HINT_FILE_NAME);
+        let io_manager = new_io_manager(file_name)?;
+
+        Ok(DataFile {
+            file_id: Arc::new(RwLock::new(0)),
+            write_off: Arc::new(RwLock::new(0)),
+            io_manager: Box::new(io_manager),
+        })
+    }
+
+    pub fn new_merge_fin_file(dir_path: PathBuf) -> Result<DataFile> {
+        let file_name= dir_path.join(MERGE_FINISH_FILE_NAME);
+        let io_manager = new_io_manager(file_name)?;
+
+        Ok(DataFile {
+            file_id: Arc::new(RwLock::new(0)),
             write_off: Arc::new(RwLock::new(0)),
             io_manager: Box::new(io_manager),
         })
@@ -48,6 +72,17 @@ impl DataFile {
         let mut write_off = self.write_off.write();
         *write_off += n_bytes as u64;
         Ok(n_bytes)
+    }
+
+    pub fn write_hint_record(&self,key:Vec<u8>,pos:LogRecodPos) -> Result<()> {
+        let mut hint_record =LogRecord {
+            key,
+            value: pos.encode(),
+            rec_type: LogRecodType::NORMAL,
+        };
+        let enc_record=hint_record.encode();
+        self.write(&enc_record)?;
+        Ok(())
     }
 
     pub fn read_log_record(&self, offset: u64) -> Result<ReadLogRecord> {

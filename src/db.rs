@@ -1,4 +1,4 @@
-use crate::data::data_file::{DataFile, DATA_FILE_NAME_SUFFIX};
+use crate::data::data_file::{DataFile, DATA_FILE_NAME_SUFFIX, MERGE_FINISH_FILE_NAME};
 use crate::data::log_record::LogRecodType::DELETED;
 use crate::data::log_record::{LogRecodPos, LogRecodType, LogRecord, TransactionRecord};
 use crate::errors::{Errors, Result};
@@ -16,6 +16,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use crate::batch::{log_record_with_seq, parse_log_record_key, NON_TRANSACTION_SEQ_NO};
+use crate::merge::load_merge_files;
 
 pub(crate) const FILE_LOCK_NAME: &str = "flock";
 
@@ -27,6 +28,7 @@ pub struct Engine {
     pub(crate) file_ids: Vec<u32>,
     pub(crate) batch_commit_lock:Mutex<()>,
     pub(crate) seq_no: Arc<AtomicUsize>,
+    pub(crate) merging_lock:Mutex<()>,
 }
 const INITIAL_FILE_ID: u32 = 0;
 impl Engine {
@@ -44,6 +46,9 @@ impl Engine {
                 return Err(Errors::FailToCreateDatabaseDir);
             }
         }
+
+        load_merge_files(dir_path.clone())?;
+
         let mut data_files = load_data_files(dir_path.clone())?;
         let mut file_ids: Vec<u32> = Vec::new();
         for v in data_files.iter() {
@@ -69,7 +74,9 @@ impl Engine {
             file_ids,
             batch_commit_lock:Mutex::new(()),
             seq_no: Arc::new(AtomicUsize::new(1)),
+            merging_lock:Mutex::new(()),
         };
+        engine.load_index_from_data_files()?;
 
         let current_seq_no=engine.load_index_from_data_files()?;
         if current_seq_no>0 {
@@ -213,11 +220,25 @@ impl Engine {
             return Ok(current_seq_no);
         }
 
+        let mut has_merged=false;
+        let mut non_merged_fid=0;
+        let merge_fin_file=self.option.dir_path.join(MERGE_FINISH_FILE_NAME);
+        if merge_fin_file.is_file() {
+            let merge_fin_file=DataFile::new_merge_fin_file(self.option.dir_path.clone())?;
+            let merge_fin_record=merge_fin_file.read_log_record(0)?;
+            let v=String::from_utf8(merge_fin_record.record.value).unwrap();
+            non_merged_fid=v.parse::<u32>().unwrap();
+            has_merged=true;
+        }
+
         let mut transaction_records=HashMap::new();
 
         let active_file = self.active_file.read();
         let older_file = self.older_file.read();
         for (i, file_id) in self.file_ids.iter().enumerate() {
+            if has_merged && *file_id<non_merged_fid {
+                continue;
+            }
             let mut offset = 0;
             loop {
                 let log_record_res = match *file_id == active_file.get_file_id() {
@@ -293,8 +314,6 @@ impl Engine {
     }
 
 }
-
-
 
 fn load_data_files(dir_path: PathBuf) -> Result<Vec<DataFile>> {
     let dir = fs::read_dir(dir_path.clone());
