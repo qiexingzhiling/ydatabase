@@ -1,4 +1,6 @@
 mod btree;
+mod skiplist;
+mod bptree;
 
 use crate::data::log_record::LogRecodPos;
 use crate::index;
@@ -18,10 +20,10 @@ pub trait Indexer {
     fn iterator(&self, iterator_options: IteratorOptions) -> Box<dyn IndexIterator>;
 }
 
-pub fn new_indexer(index_type: IndexType) -> impl Indexer {
+pub fn new_indexer(index_type: IndexType) -> Box<dyn Indexer> {
     match index_type {
-        IndexType::BTree => btree::BTree::new(),
-        SkipList => todo!(),
+        IndexType::BTree => Box::new(btree::BTree::new()),
+        SkipList => Box::new(skiplist::SkipList::new()),
         _ => panic!("unknown index type"),
     }
 }

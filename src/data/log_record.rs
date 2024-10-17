@@ -94,7 +94,7 @@ pub fn max_log_record_header_size() -> usize {
     std::mem::size_of::<u8>() + length_delimiter_len(std::u32::MAX as usize)
 }
 
-pub fn decode_log_record(pos:Vec<u8>) -> LogRecodPos {
+pub fn decode_log_record_pos(pos:Vec<u8>) -> LogRecodPos {
     let mut buf=BytesMut::new();
     buf.put_slice(&pos);
 

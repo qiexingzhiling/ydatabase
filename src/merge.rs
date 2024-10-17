@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use log::error;
 use crate::batch::{log_record_with_seq, parse_log_record_key, NON_TRANSACTION_SEQ_NO};
 use crate::data::data_file::{get_data_file_name, DataFile, HINT_FILE_NAME, MERGE_FINISH_FILE_NAME};
-use crate::data::log_record::{decode_log_record, LogRecodType, LogRecord};
+use crate::data::log_record::{decode_log_record_pos, LogRecodType, LogRecord};
 use crate::db::Engine;
 use crate::errors::{Errors, Result};
 use crate::options::Options;
@@ -124,7 +124,7 @@ impl Engine {
                 }
             };
 
-            let log_record_pos= decode_log_record(log_record.value);
+            let log_record_pos= decode_log_record_pos(log_record.value);
             self.index.put(log_record.key,log_record_pos);
             offset += size as u64;
 
