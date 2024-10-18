@@ -39,5 +39,7 @@ pub enum Errors {
     ExceedMaxBatchNum,
     #[error("Merging is progressing,please try again later")]
     MergingIsProgressing,
+    #[error("can not use write batch")]
+    CanNotUseWriteBatch,
 }
 pub type Result<T> = result::Result<T, Errors>;

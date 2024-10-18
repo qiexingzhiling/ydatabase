@@ -1,11 +1,11 @@
+mod batch;
 mod data;
 pub mod db;
+mod db_tests;
 mod errors;
 mod fio;
 mod index;
 mod iterator;
+mod merge;
 pub mod options;
 mod util;
-mod db_tests;
-mod batch;
-mod merge;

@@ -1,10 +1,13 @@
+use crate::batch::{log_record_with_seq, parse_log_record_key, NON_TRANSACTION_SEQ_NO};
 use crate::data::data_file::{DataFile, DATA_FILE_NAME_SUFFIX, MERGE_FINISH_FILE_NAME};
 use crate::data::log_record::LogRecodType::DELETED;
 use crate::data::log_record::{LogRecodPos, LogRecodType, LogRecord, TransactionRecord};
 use crate::errors::{Errors, Result};
-use crate::options::Options;
+use crate::merge::load_merge_files;
+use crate::options::{IndexType, Options};
 use crate::{index, options};
 use bytes::Bytes;
+use jammdb::Data;
 use log::warn;
 use parking_lot::{Mutex, RwLock};
 use std::any::Any;
@@ -13,12 +16,11 @@ use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
-use crate::batch::{log_record_with_seq, parse_log_record_key, NON_TRANSACTION_SEQ_NO};
-use crate::merge::load_merge_files;
+use std::sync::Arc;
 
 pub(crate) const FILE_LOCK_NAME: &str = "flock";
+pub const SEQ_NO_KEY: &str = "seq.no";
 
 pub struct Engine {
     pub(crate) option: Arc<Options>,
@@ -26,16 +28,20 @@ pub struct Engine {
     pub(crate) older_file: Arc<RwLock<HashMap<u32, DataFile>>>,
     pub(crate) index: Box<dyn index::Indexer>,
     pub(crate) file_ids: Vec<u32>,
-    pub(crate) batch_commit_lock:Mutex<()>,
+    pub(crate) batch_commit_lock: Mutex<()>,
     pub(crate) seq_no: Arc<AtomicUsize>,
-    pub(crate) merging_lock:Mutex<()>,
+    pub(crate) merging_lock: Mutex<()>,
+    pub(crate) seq_file_exist: bool,
+    pub(crate) is_initial: bool,
 }
 const INITIAL_FILE_ID: u32 = 0;
+
 impl Engine {
     pub fn open(opts: Options) -> Result<Self> {
         if let Some(e) = check_options(&opts) {
             return Err(e);
         }
+
         let mut is_initial = false;
         let options = opts.clone();
         let dir_path = options.dir_path.clone();
@@ -45,6 +51,10 @@ impl Engine {
                 warn!("create database directory err:{}", e);
                 return Err(Errors::FailToCreateDatabaseDir);
             }
+        }
+        let entries = fs::read_dir(dir_path.clone()).unwrap();
+        if entries.count() == 0 {
+            is_initial = true;
         }
 
         load_merge_files(dir_path.clone())?;
@@ -70,29 +80,54 @@ impl Engine {
             option: Arc::new(opts),
             active_file: Arc::new(RwLock::new(active_file)),
             older_file: Arc::new(RwLock::new(older_files)),
-            index: index::new_indexer(options.index_type),
+            index: index::new_indexer(options.index_type, options.dir_path),
             file_ids,
-            batch_commit_lock:Mutex::new(()),
+            batch_commit_lock: Mutex::new(()),
             seq_no: Arc::new(AtomicUsize::new(1)),
-            merging_lock:Mutex::new(()),
+            merging_lock: Mutex::new(()),
+            seq_file_exist: false,
+            is_initial,
         };
-        engine.load_index_from_data_files()?;
 
-        let current_seq_no=engine.load_index_from_data_files()?;
-        if current_seq_no>0 {
-            engine.seq_no.store(current_seq_no,Ordering::SeqCst);
+        if engine.option.index_type == IndexType::BPlusTree {
+            engine.load_index_from_data_files()?;
+
+            let current_seq_no = engine.load_index_from_data_files()?;
+            if current_seq_no > 0 {
+                engine.seq_no.store(current_seq_no, Ordering::SeqCst);
+            }
+        }
+
+        if IndexType::BPlusTree == engine.option.index_type {
+            let (exist, seqno) = engine.load_seq_no();
+            engine.seq_no.store(seqno, Ordering::SeqCst);
+            engine.seq_file_exist = exist;
+
+            let active_file = engine.active_file.write();
+            active_file.set_write_off(active_file.file_size());
         }
 
         Ok(engine)
     }
 
     pub fn close(&self) -> Result<()> {
-        let read_guard=self.active_file.read();
+        let seq_no_file = DataFile::new_seq_no_file(self.option.dir_path.clone())?;
+        let seq_no = self.seq_no.load(Ordering::SeqCst);
+        let mut record = LogRecord {
+            key: SEQ_NO_KEY.as_bytes().to_vec(),
+            value: seq_no.to_string().into_bytes(),
+            rec_type: LogRecodType::NORMAL,
+        };
+
+        seq_no_file.write(&record.encode())?;
+        seq_no_file.sync()?;
+
+        let read_guard = self.active_file.read();
         read_guard.sync()
     }
 
     pub fn sync(&self) -> Result<()> {
-        let read_guard=self.active_file.read();
+        let read_guard = self.active_file.read();
         read_guard.sync()
     }
     pub fn put(&self, key: Bytes, value: Bytes) -> Result<()> {
@@ -100,7 +135,7 @@ impl Engine {
             return Err(Errors::KeyIsEmpty);
         }
         let mut record: LogRecord = LogRecord {
-            key: log_record_with_seq(key.to_vec(),NON_TRANSACTION_SEQ_NO),
+            key: log_record_with_seq(key.to_vec(), NON_TRANSACTION_SEQ_NO),
             value: value.to_vec(),
             rec_type: LogRecodType::NORMAL,
         };
@@ -123,7 +158,7 @@ impl Engine {
             return Ok(());
         }
         let mut record = LogRecord {
-            key: log_record_with_seq(key.to_vec(),NON_TRANSACTION_SEQ_NO),
+            key: log_record_with_seq(key.to_vec(), NON_TRANSACTION_SEQ_NO),
             value: Default::default(),
             rec_type: LogRecodType::DELETED,
         };
@@ -214,29 +249,29 @@ impl Engine {
         })
     }
     fn load_index_from_data_files(&mut self) -> Result<usize> {
-        let mut current_seq_no:usize=NON_TRANSACTION_SEQ_NO;
+        let mut current_seq_no: usize = NON_TRANSACTION_SEQ_NO;
 
         if self.file_ids.is_empty() {
             return Ok(current_seq_no);
         }
 
-        let mut has_merged=false;
-        let mut non_merged_fid=0;
-        let merge_fin_file=self.option.dir_path.join(MERGE_FINISH_FILE_NAME);
+        let mut has_merged = false;
+        let mut non_merged_fid = 0;
+        let merge_fin_file = self.option.dir_path.join(MERGE_FINISH_FILE_NAME);
         if merge_fin_file.is_file() {
-            let merge_fin_file=DataFile::new_merge_fin_file(self.option.dir_path.clone())?;
-            let merge_fin_record=merge_fin_file.read_log_record(0)?;
-            let v=String::from_utf8(merge_fin_record.record.value).unwrap();
-            non_merged_fid=v.parse::<u32>().unwrap();
-            has_merged=true;
+            let merge_fin_file = DataFile::new_merge_fin_file(self.option.dir_path.clone())?;
+            let merge_fin_record = merge_fin_file.read_log_record(0)?;
+            let v = String::from_utf8(merge_fin_record.record.value).unwrap();
+            non_merged_fid = v.parse::<u32>().unwrap();
+            has_merged = true;
         }
 
-        let mut transaction_records=HashMap::new();
+        let mut transaction_records = HashMap::new();
 
         let active_file = self.active_file.read();
         let older_file = self.older_file.read();
         for (i, file_id) in self.file_ids.iter().enumerate() {
-            if has_merged && *file_id<non_merged_fid {
+            if has_merged && *file_id < non_merged_fid {
                 continue;
             }
             let mut offset = 0;
@@ -281,8 +316,7 @@ impl Engine {
                             );
                         }
                         transaction_records.remove(&seq_no);
-                    }
-                    else {
+                    } else {
                         log_record.key = real_key;
                         transaction_records
                             .entry(seq_no)
@@ -293,8 +327,8 @@ impl Engine {
                             });
                     }
                 }
-                if seq_no>current_seq_no {
-                    current_seq_no=seq_no;
+                if seq_no > current_seq_no {
+                    current_seq_no = seq_no;
                 }
                 offset += size as u64;
             }
@@ -304,15 +338,42 @@ impl Engine {
         }
         Ok(current_seq_no)
     }
-    fn update_index(&self,key:Vec<u8>,log_recod_type: LogRecodType,pos:LogRecodPos)  {
-        if log_recod_type==LogRecodType::NORMAL {
-            self.index.put(key.clone(),pos);
+    fn update_index(&self, key: Vec<u8>, log_recod_type: LogRecodType, pos: LogRecodPos) {
+        if log_recod_type == LogRecodType::NORMAL {
+            self.index.put(key.clone(), pos);
         }
-        if log_recod_type==LogRecodType::DELETED {
+        if log_recod_type == LogRecodType::DELETED {
             self.index.delete(key);
         }
     }
 
+    fn load_seq_no(&self) -> (bool, usize) {
+        let file_name = self.option.dir_path.join("SEQ_NO_FILE_NAME");
+        if !file_name.is_file() {
+            return (false, 0);
+        }
+
+        let seq_no_file = DataFile::new_seq_no_file(self.option.dir_path.clone()).unwrap();
+        let record = match seq_no_file.read_log_record(0) {
+            Ok(result) => result.record,
+            Err(e) => panic!("fail to read seq no {}", e),
+        };
+
+        let v = String::from_utf8(record.value).unwrap();
+        let seq_no = v.parse::<usize>().unwrap();
+
+        fs::remove_file(file_name).unwrap();
+
+        (true, seq_no)
+    }
+}
+
+impl Drop for Engine {
+    fn drop(&mut self) {
+        if let Err(e) = self.close() {
+            log::error!("error closing engine thread: {}", e);
+        }
+    }
 }
 
 fn load_data_files(dir_path: PathBuf) -> Result<Vec<DataFile>> {
@@ -327,7 +388,6 @@ fn load_data_files(dir_path: PathBuf) -> Result<Vec<DataFile>> {
         if let Ok(entry) = file {
             let file_os_str = entry.file_name();
             let file_name = file_os_str.to_str().unwrap();
-
             if file_name.ends_with(DATA_FILE_NAME_SUFFIX) {
                 let split_names: Vec<&str> = file_name.split(".").collect();
                 let file_id = match split_names[0].parse::<u32>() {

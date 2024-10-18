@@ -1,10 +1,10 @@
 use crate::data::log_record::LogRecodPos;
 use crate::index::{IndexIterator, Indexer};
 use crate::options::IteratorOptions;
+use bytes::Bytes;
 use parking_lot::RwLock;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use bytes::Bytes;
 
 pub struct BTree {
     tree: Arc<RwLock<BTreeMap<Vec<u8>, LogRecodPos>>>,
@@ -37,14 +37,13 @@ impl Indexer for BTree {
 
     fn list_keys(&self) -> crate::errors::Result<Vec<Bytes>> {
         let read_guard = self.tree.read();
-        let mut keys= Vec::with_capacity(read_guard.len());
+        let mut keys = Vec::with_capacity(read_guard.len());
 
         for (k, v) in read_guard.iter() {
             keys.push(Bytes::copy_from_slice(&k));
         }
         Ok(keys)
     }
-
 
     fn iterator(&self, iterator_options: IteratorOptions) -> Box<dyn IndexIterator> {
         let read_guard = self.tree.read();
@@ -62,8 +61,6 @@ impl Indexer for BTree {
             options: iterator_options,
         })
     }
-
-
 }
 
 pub struct BTreeIterator {
@@ -103,7 +100,6 @@ impl IndexIterator for BTreeIterator {
         }
         None
     }
-
 }
 
 #[cfg(test)]

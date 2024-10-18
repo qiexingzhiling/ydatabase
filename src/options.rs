@@ -7,11 +7,13 @@ pub struct Options {
     pub index_type: IndexType,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum IndexType {
     BTree,
 
     SkipList,
+
+    BPlusTree,
 }
 
 impl Default for Options {
