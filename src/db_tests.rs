@@ -195,3 +195,20 @@ fn test_engine_sync() {
     // 删除测试的文件夹
     std::fs::remove_dir_all(opts.clone().dir_path).expect("failed to remove path");
 }
+
+#[test]
+fn test_engine_file_lock() {
+    let mut opts = Options::default();
+    opts.dir_path = PathBuf::from("/tmp/bitcask-rs-file-lock");
+    let engine = Engine::open(opts.clone()).expect("failed to open engine");
+
+    let res_1 = Engine::open(opts.clone());
+    assert_eq!(res_1.err().unwrap(), Errors::DataBaseIsUsing);
+
+    let res_2 = engine.close();
+    assert!(res_2.is_ok());
+    let res_3 = Engine::open(opts.clone());
+    assert!(res_3.is_ok());
+
+    std::fs::remove_dir_all(opts.clone().dir_path).expect("failed to remove dir");
+}

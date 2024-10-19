@@ -4,9 +4,11 @@ use crate::data::log_record::LogRecodType::DELETED;
 use crate::data::log_record::{LogRecodPos, LogRecodType, LogRecord, TransactionRecord};
 use crate::errors::{Errors, Result};
 use crate::merge::load_merge_files;
-use crate::options::{IndexType, Options};
+use crate::options::IOType::{MemoryMap, StandardIO};
+use crate::options::{IOType, IndexType, Options};
 use crate::{index, options};
 use bytes::Bytes;
+use fs2::FileExt;
 use jammdb::Data;
 use log::warn;
 use parking_lot::{Mutex, RwLock};
@@ -33,6 +35,8 @@ pub struct Engine {
     pub(crate) merging_lock: Mutex<()>,
     pub(crate) seq_file_exist: bool,
     pub(crate) is_initial: bool,
+    pub(crate) lock_file: File,
+    pub(crate) bytes_write: Arc<AtomicUsize>,
 }
 const INITIAL_FILE_ID: u32 = 0;
 
@@ -52,6 +56,18 @@ impl Engine {
                 return Err(Errors::FailToCreateDatabaseDir);
             }
         }
+
+        let lock_file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .append(true)
+            .open(dir_path.join(FILE_LOCK_NAME))
+            .unwrap();
+        if let Err(e) = lock_file.try_lock_exclusive() {
+            return Err(Errors::DataBaseIsUsing);
+        }
+
         let entries = fs::read_dir(dir_path.clone()).unwrap();
         if entries.count() == 0 {
             is_initial = true;
@@ -59,7 +75,7 @@ impl Engine {
 
         load_merge_files(dir_path.clone())?;
 
-        let mut data_files = load_data_files(dir_path.clone())?;
+        let mut data_files = load_data_files(dir_path.clone(), options.mmap_at_startup)?;
         let mut file_ids: Vec<u32> = Vec::new();
         for v in data_files.iter() {
             file_ids.push(v.get_file_id());
@@ -74,7 +90,7 @@ impl Engine {
         }
         let active_file = match data_files.pop() {
             Some(v) => v,
-            None => DataFile::new(dir_path.clone(), INITIAL_FILE_ID)?,
+            None => DataFile::new(dir_path.clone(), INITIAL_FILE_ID, IOType::StandardIO)?,
         };
         let mut engine = Self {
             option: Arc::new(opts),
@@ -87,6 +103,8 @@ impl Engine {
             merging_lock: Mutex::new(()),
             seq_file_exist: false,
             is_initial,
+            lock_file,
+            bytes_write: Arc::new(AtomicUsize::new(0)),
         };
 
         if engine.option.index_type == IndexType::BPlusTree {
@@ -95,6 +113,10 @@ impl Engine {
             let current_seq_no = engine.load_index_from_data_files()?;
             if current_seq_no > 0 {
                 engine.seq_no.store(current_seq_no, Ordering::SeqCst);
+            }
+
+            if engine.option.mmap_at_startup {
+                engine.reset_io_type();
             }
         }
 
@@ -111,6 +133,9 @@ impl Engine {
     }
 
     pub fn close(&self) -> Result<()> {
+        if !self.option.dir_path.is_dir() {
+            return Ok(());
+        }
         let seq_no_file = DataFile::new_seq_no_file(self.option.dir_path.clone())?;
         let seq_no = self.seq_no.load(Ordering::SeqCst);
         let mut record = LogRecord {
@@ -123,7 +148,10 @@ impl Engine {
         seq_no_file.sync()?;
 
         let read_guard = self.active_file.read();
-        read_guard.sync()
+        read_guard.sync()?;
+        self.lock_file.unlock().unwrap();
+
+        Ok(())
     }
 
     pub fn sync(&self) -> Result<()> {
@@ -233,15 +261,27 @@ impl Engine {
             active_file.sync()?;
             let current_id = active_file.get_file_id();
             let mut older_file = self.older_file.write();
-            let old_file = DataFile::new(dir_path.clone(), current_id)?;
+            let old_file = DataFile::new(dir_path.clone(), current_id, IOType::StandardIO)?;
             older_file.insert(current_id, old_file);
-            let new_file = DataFile::new(dir_path.clone(), current_id + 1)?;
+            let new_file = DataFile::new(dir_path.clone(), current_id + 1, IOType::StandardIO)?;
             *active_file = new_file;
         }
         let write_off = active_file.get_write_off();
         active_file.write(&enc_record)?;
-        if self.option.sync_writes {
+
+        let previous = self
+            .bytes_write
+            .fetch_add(enc_record.len(), Ordering::SeqCst);
+        let mut need_sync = self.option.sync_writes;
+        if !need_sync
+            && self.option.bytes_per_sync > 0
+            && previous + enc_record.len() >= self.option.bytes_per_sync
+        {
+            need_sync = true;
+        }
+        if need_sync {
             active_file.sync()?;
+            self.bytes_write.store(0, Ordering::SeqCst);
         }
         Ok(LogRecodPos {
             file_id: active_file.get_file_id(),
@@ -366,6 +406,16 @@ impl Engine {
 
         (true, seq_no)
     }
+
+    fn reset_io_type(&self) {
+        let mut active_file = self.active_file.write();
+        active_file.set_io_manager(self.option.dir_path.clone(), IOType::StandardIO);
+
+        let mut older_file = self.older_file.write();
+        for (_, file) in older_file.iter_mut() {
+            file.set_io_manager(self.option.dir_path.clone(), IOType::StandardIO);
+        }
+    }
 }
 
 impl Drop for Engine {
@@ -376,7 +426,7 @@ impl Drop for Engine {
     }
 }
 
-fn load_data_files(dir_path: PathBuf) -> Result<Vec<DataFile>> {
+fn load_data_files(dir_path: PathBuf, use_map: bool) -> Result<Vec<DataFile>> {
     let dir = fs::read_dir(dir_path.clone());
     if dir.is_err() {
         return Err(Errors::FailToReadDatabasedir);
@@ -405,7 +455,11 @@ fn load_data_files(dir_path: PathBuf) -> Result<Vec<DataFile>> {
     }
     file_ids.sort();
     for file_id in file_ids.iter() {
-        let data_file = DataFile::new(dir_path.clone(), *file_id)?;
+        let mut io_type = StandardIO;
+        if use_map {
+            io_type = MemoryMap;
+        }
+        let data_file = DataFile::new(dir_path.clone(), *file_id, io_type)?;
         data_files.push(data_file);
     }
 

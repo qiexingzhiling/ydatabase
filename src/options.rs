@@ -4,7 +4,9 @@ pub struct Options {
     pub dir_path: PathBuf,
     pub data_file_size: u64,
     pub sync_writes: bool,
+    pub bytes_per_sync: usize,
     pub index_type: IndexType,
+    pub mmap_at_startup: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -22,7 +24,9 @@ impl Default for Options {
             dir_path: std::env::temp_dir().join("kv-data"),
             data_file_size: 256 * 1024 * 1024,
             sync_writes: false,
+            bytes_per_sync: 0,
             index_type: IndexType::BTree,
+            mmap_at_startup: true,
         }
     }
 }
@@ -53,4 +57,9 @@ impl Default for WriteBatchOptions {
             sync_writes: true,
         }
     }
+}
+#[derive(Clone, Debug, PartialEq)]
+pub enum IOType {
+    StandardIO,
+    MemoryMap,
 }

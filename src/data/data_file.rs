@@ -4,6 +4,7 @@ use crate::data::log_record::{
 use crate::errors::{Errors, Result};
 use crate::fio;
 use crate::fio::{new_io_manager, IOManager};
+use crate::options::IOType;
 use bytes::{Buf, BytesMut};
 use parking_lot::RwLock;
 use prost::{decode_length_delimiter, length_delimiter_len};
@@ -22,47 +23,47 @@ pub struct DataFile {
     io_manager: Box<dyn fio::IOManager>,
 }
 impl DataFile {
-    pub fn new(dir_path: PathBuf, file_id: u32) -> Result<DataFile> {
+    pub fn new(dir_path: PathBuf, file_id: u32, io_type: IOType) -> Result<DataFile> {
         let file_name = get_data_file_name(dir_path, file_id);
-        let io_manager = new_io_manager(file_name)?;
+        let io_manager = new_io_manager(file_name, io_type);
 
         Ok(DataFile {
             file_id: Arc::new(RwLock::new(file_id)),
             write_off: Arc::new(RwLock::new(0)),
-            io_manager: Box::new(io_manager),
+            io_manager,
         })
     }
 
     pub fn new_hint_file(dir_path: PathBuf) -> Result<DataFile> {
         let file_name = dir_path.join(HINT_FILE_NAME);
-        let io_manager = new_io_manager(file_name)?;
+        let io_manager = new_io_manager(file_name, IOType::StandardIO);
 
         Ok(DataFile {
             file_id: Arc::new(RwLock::new(0)),
             write_off: Arc::new(RwLock::new(0)),
-            io_manager: Box::new(io_manager),
+            io_manager,
         })
     }
 
     pub fn new_merge_fin_file(dir_path: PathBuf) -> Result<DataFile> {
         let file_name = dir_path.join(MERGE_FINISH_FILE_NAME);
-        let io_manager = new_io_manager(file_name)?;
+        let io_manager = new_io_manager(file_name, IOType::StandardIO);
 
         Ok(DataFile {
             file_id: Arc::new(RwLock::new(0)),
             write_off: Arc::new(RwLock::new(0)),
-            io_manager: Box::new(io_manager),
+            io_manager,
         })
     }
 
     pub fn new_seq_no_file(dir_path: PathBuf) -> Result<DataFile> {
         let file_name = dir_path.join(SEQ_NO_FILE_NAME);
-        let io_manager = new_io_manager(file_name)?;
+        let io_manager = new_io_manager(file_name, IOType::StandardIO);
 
         Ok(DataFile {
             file_id: Arc::new(RwLock::new(0)),
             write_off: Arc::new(RwLock::new(0)),
-            io_manager: Box::new(io_manager),
+            io_manager,
         })
     }
     pub fn get_write_off(&self) -> u64 {
@@ -138,6 +139,10 @@ impl DataFile {
         let mut write_guard = self.write_off.write();
         *write_guard = offset;
     }
+
+    pub fn set_io_manager(&mut self, dir_path: PathBuf, io_type: IOType) {
+        self.io_manager = new_io_manager(get_data_file_name(dir_path, self.get_file_id()), io_type);
+    }
 }
 
 pub fn get_data_file_name(path: PathBuf, file_id: u32) -> PathBuf {
@@ -145,62 +150,65 @@ pub fn get_data_file_name(path: PathBuf, file_id: u32) -> PathBuf {
     path.to_path_buf().join(v)
 }
 
-#[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn test_new_data_file() {
         let dir_path = std::env::temp_dir();
-
-        let datafile_res = DataFile::new(dir_path.clone(), 0);
-        assert_eq!(datafile_res.is_ok(), true);
-        let data_file1 = datafile_res.unwrap();
+        let data_file_res1 = DataFile::new(dir_path.clone(), 0, IOType::StandardIO);
+        assert!(data_file_res1.is_ok());
+        let data_file1 = data_file_res1.unwrap();
         assert_eq!(data_file1.get_file_id(), 0);
 
-        let datafile_res2 = DataFile::new(dir_path.clone(), 0);
-        assert_eq!(datafile_res2.is_ok(), true);
-        let data_file2 = datafile_res2.unwrap();
+        let data_file_res2 = DataFile::new(dir_path.clone(), 0, IOType::StandardIO);
+        assert!(data_file_res2.is_ok());
+        let data_file2 = data_file_res2.unwrap();
         assert_eq!(data_file2.get_file_id(), 0);
 
-        let datafile_res3 = DataFile::new(dir_path.clone(), 660);
-        assert_eq!(datafile_res3.is_ok(), true);
-        let data_file3 = datafile_res3.unwrap();
+        let data_file_res3 = DataFile::new(dir_path.clone(), 660, IOType::StandardIO);
+        assert!(data_file_res3.is_ok());
+        let data_file3 = data_file_res3.unwrap();
         assert_eq!(data_file3.get_file_id(), 660);
     }
 
     #[test]
     fn test_data_file_write() {
         let dir_path = std::env::temp_dir();
-        let datafile_res1 = DataFile::new(dir_path.clone(), 0);
-        assert_eq!(datafile_res1.is_ok(), true);
-        let data_file1 = datafile_res1.unwrap();
-        assert_eq!(data_file1.get_file_id(), 0);
+        let data_file_res1 = DataFile::new(dir_path.clone(), 100, IOType::StandardIO);
+        assert!(data_file_res1.is_ok());
+        let data_file1 = data_file_res1.unwrap();
+        assert_eq!(data_file1.get_file_id(), 100);
 
         let write_res1 = data_file1.write("aaa".as_bytes());
-        assert_eq!(write_res1.is_ok(), true);
-        assert_eq!(write_res1.unwrap(), 3);
+        assert!(write_res1.is_ok());
+        assert_eq!(write_res1.unwrap(), 3 as usize);
 
         let write_res2 = data_file1.write("bbb".as_bytes());
-        assert_eq!(write_res2.is_ok(), true);
-        assert_eq!(write_res2.unwrap(), 3);
+        assert!(write_res2.is_ok());
+        assert_eq!(write_res2.unwrap(), 3 as usize);
+
+        let write_res3 = data_file1.write("ccc".as_bytes());
+        assert!(write_res3.is_ok());
+        assert_eq!(write_res3.unwrap(), 3 as usize);
     }
 
     #[test]
-    fn test_data_sync() {
+    fn test_data_file_sync() {
         let dir_path = std::env::temp_dir();
-        let datafile_res1 = DataFile::new(dir_path.clone(), 0);
-        assert_eq!(datafile_res1.is_ok(), true);
-        let data_file1 = datafile_res1.unwrap();
-        assert_eq!(data_file1.get_file_id(), 0);
+        let data_file_res1 = DataFile::new(dir_path.clone(), 200, IOType::StandardIO);
+        assert!(data_file_res1.is_ok());
+        let data_file1 = data_file_res1.unwrap();
+        assert_eq!(data_file1.get_file_id(), 200);
 
-        let res = data_file1.sync();
-        assert_eq!(res.is_ok(), true);
+        let sync_res = data_file1.sync();
+        assert!(sync_res.is_ok());
     }
 
     #[test]
     fn test_data_file_read_log_record() {
         let dir_path = std::env::temp_dir();
-        let data_file_res1 = DataFile::new(dir_path.clone(), 700);
+        let data_file_res1 = DataFile::new(dir_path.clone(), 700, IOType::StandardIO);
         assert!(data_file_res1.is_ok());
         let data_file1 = data_file_res1.unwrap();
         assert_eq!(data_file1.get_file_id(), 700);

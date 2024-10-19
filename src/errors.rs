@@ -41,5 +41,7 @@ pub enum Errors {
     MergingIsProgressing,
     #[error("can not use write batch")]
     CanNotUseWriteBatch,
+    #[error("database is using")]
+    DataBaseIsUsing,
 }
 pub type Result<T> = result::Result<T, Errors>;

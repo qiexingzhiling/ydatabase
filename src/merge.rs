@@ -3,9 +3,9 @@ use crate::data::data_file::{
     get_data_file_name, DataFile, HINT_FILE_NAME, MERGE_FINISH_FILE_NAME, SEQ_NO_FILE_NAME,
 };
 use crate::data::log_record::{decode_log_record_pos, LogRecodType, LogRecord};
-use crate::db::Engine;
+use crate::db::{Engine, FILE_LOCK_NAME};
 use crate::errors::{Errors, Result};
-use crate::options::Options;
+use crate::options::{IOType, Options};
 use log::error;
 use std::fs;
 use std::path::PathBuf;
@@ -89,17 +89,26 @@ impl Engine {
         let mut active_file = self.active_file.write();
         active_file.sync()?;
         let active_file_id = active_file.get_file_id();
-        let new_file = DataFile::new(self.option.dir_path.clone(), active_file_id + 1)?;
+        let new_file = DataFile::new(
+            self.option.dir_path.clone(),
+            active_file_id + 1,
+            IOType::StandardIO,
+        )?;
         *active_file = new_file;
 
-        let old_file = DataFile::new(self.option.dir_path.clone(), active_file_id)?;
+        let old_file = DataFile::new(
+            self.option.dir_path.clone(),
+            active_file_id,
+            IOType::StandardIO,
+        )?;
         older_files.insert(active_file_id, old_file);
         merge_file_ids.push(active_file_id);
         merge_file_ids.sort();
 
         let mut merge_files = Vec::new();
         for file_id in merge_file_ids.iter() {
-            let data_file = DataFile::new(self.option.dir_path.clone(), *file_id)?;
+            let data_file =
+                DataFile::new(self.option.dir_path.clone(), *file_id, IOType::StandardIO)?;
             merge_files.push(data_file);
         }
         Ok(merge_files)
@@ -164,6 +173,11 @@ pub(crate) fn load_merge_files(dir_path: PathBuf) -> Result<()> {
             if file_name.ends_with(SEQ_NO_FILE_NAME) {
                 continue;
             }
+
+            if file_name.ends_with(FILE_LOCK_NAME) {
+                continue;
+            }
+
             merge_file_names.push(entry.file_name());
         }
     }
