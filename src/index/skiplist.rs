@@ -59,9 +59,13 @@ impl IndexIterator for SkipListIterator {
 }
 
 impl Indexer for SkipList {
-    fn put(&self, key: Vec<u8>, pos: LogRecodPos) -> bool {
+    fn put(&self, key: Vec<u8>, pos: LogRecodPos) -> Some(LogRecodPos){
+        let mut result: Option<LogRecodPos> = None;
+        let Some(entry)=self.skl.get(&key) {
+            result=Some(*entry.value());
+        }
         self.skl.insert(key, pos);
-        true
+        result
     }
 
     fn get(&self, key: Vec<u8>) -> Option<LogRecodPos> {
@@ -71,9 +75,11 @@ impl Indexer for SkipList {
         None
     }
 
-    fn delete(&self, key: Vec<u8>) -> bool {
-        let remove_res = self.skl.remove(&key);
-        remove_res.is_some()
+    fn delete(&self, key: Vec<u8>) -> Option<LogRecodPos> {
+        if let Some(entry) = self.skl.get(&key) {
+            return Some(*entry.value());
+        }
+        None
     }
 
     fn list_keys(&self) -> crate::errors::Result<Vec<Bytes>> {

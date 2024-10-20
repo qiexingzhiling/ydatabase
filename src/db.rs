@@ -37,6 +37,7 @@ pub struct Engine {
     pub(crate) is_initial: bool,
     pub(crate) lock_file: File,
     pub(crate) bytes_write: Arc<AtomicUsize>,
+    pub(crate) reclaim_size: Arc<AtomicUsize>,
 }
 const INITIAL_FILE_ID: u32 = 0;
 
@@ -105,6 +106,7 @@ impl Engine {
             is_initial,
             lock_file,
             bytes_write: Arc::new(AtomicUsize::new(0)),
+            reclaim_size:Arc::new(AtomicUsize::new(0)),
         };
 
         if engine.option.index_type == IndexType::BPlusTree {
@@ -169,10 +171,11 @@ impl Engine {
         };
 
         let log_record_pos = self.append_log_record(&mut record)?;
-        let ok = self.index.put(key.to_vec(), log_record_pos);
-        if !ok {
-            return Err(Errors::IndexUpdateFailed);
+        
+        if let Some(old_pos)=self.index.put(key.to_vec(),log_record_pos) {
+            self.reclaim_size.fetch_add(old_pos.size as usize, Ordering::SeqCst);
         }
+        
         Ok(())
     }
 
@@ -191,9 +194,13 @@ impl Engine {
             rec_type: LogRecodType::DELETED,
         };
         self.append_log_record(&mut record)?;
-        let ok = self.index.delete(key.to_vec());
-        if !ok {
-            return Err(Errors::IndexUpdateFailed);
+        //let ok = self.index.delete(key.to_vec());
+        let pos=self.index.get(key.to_vec()).unwrap();
+        self.reclaim_size.fetch_add(pos.size as usize, Ordering::SeqCst);
+        
+        
+        if let Some(old_pos)=self.index.delete(key.to_vec()) {
+            self.reclaim_size.fetch_add(old_pos.size as usize, Ordering::SeqCst);
         }
 
         Ok(())
@@ -286,6 +293,7 @@ impl Engine {
         Ok(LogRecodPos {
             file_id: active_file.get_file_id(),
             offset: write_off,
+            size:enc_record.len() as u32,
         })
     }
     fn load_index_from_data_files(&mut self) -> Result<usize> {
@@ -337,6 +345,7 @@ impl Engine {
                 let log_record_pos = LogRecodPos {
                     file_id: *file_id,
                     offset,
+                    size: size as u32,
                 };
 
                 let (real_key, seq_no) = parse_log_record_key(log_record.key.clone());

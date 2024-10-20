@@ -11,9 +11,9 @@ use bytes::Bytes;
 use std::path::PathBuf;
 
 pub trait Indexer {
-    fn put(&self, key: Vec<u8>, pos: LogRecodPos) -> bool;
+    fn put(&self, key: Vec<u8>, pos: LogRecodPos) -> Option<LogRecodPos>;
     fn get(&self, key: Vec<u8>) -> Option<LogRecodPos>;
-    fn delete(&self, key: Vec<u8>) -> bool;
+    fn delete(&self, key: Vec<u8>) -> Option<LogRecodPos>;
 
     fn list_keys(&self) -> Result<Vec<Bytes>>;
 

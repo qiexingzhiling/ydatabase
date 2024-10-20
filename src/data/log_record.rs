@@ -37,6 +37,7 @@ pub struct ReadLogRecord {
 pub struct LogRecodPos {
     pub(crate) file_id: u32,
     pub(crate) offset: u64,
+    pub(crate) size:u32,
 }
 
 pub struct TransactionRecord {
@@ -86,6 +87,7 @@ impl LogRecodPos {
         let mut buf = BytesMut::new();
         encode_varint(self.file_id as u64, &mut buf);
         encode_varint(self.offset, &mut buf);
+        encode_varint(self.size as u64, &mut buf);
         buf.to_vec()
     }
 }
@@ -108,9 +110,20 @@ pub fn decode_log_record_pos(pos: Vec<u8>) -> LogRecodPos {
         Err(e) => panic!("decode log record failed: {}", e),
     };
 
+    let offset = match decode_varint(&mut buf) {
+        Ok(offset) => offset,
+        Err(e) => panic!("decode log record failed: {}", e),
+    };
+
+    let size=match decode_varint(&mut buf) {
+        Ok(size) => size,
+        Err(e) => panic!("decode log record failed: {}", e),
+    };
+
     LogRecodPos {
         file_id: fid as u32,
         offset: offset,
+        size:size as u32,
     }
 }
 

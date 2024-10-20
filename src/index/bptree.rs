@@ -64,12 +64,19 @@ impl BPlusTree {
 }
 
 impl Indexer for BPlusTree {
-    fn put(&self, key: Vec<u8>, pos: LogRecodPos) -> bool {
+    fn put(&self, key: Vec<u8>, pos: LogRecodPos) -> Some(LogRecodPos){
+        let mut result=None;
         let tx = self.tree.tx(true).expect("fail to create tx object");
         let bucket = tx.get_bucket(BPTREE_BUCKET_NAME).unwrap();
+
+        if let Some(kv)=bucket.get_kv(&key) {
+            let pos=decode_log_record_pos(kv.value().to_vec());
+            result = Some(pos);
+        }
+
         bucket.put(key, pos.encode()).expect("fail to put key");
         tx.commit().unwrap();
-        true
+        result
     }
 
     fn get(&self, key: Vec<u8>) -> Option<LogRecodPos> {
@@ -81,16 +88,16 @@ impl Indexer for BPlusTree {
         None
     }
 
-    fn delete(&self, key: Vec<u8>) -> bool {
+    fn delete(&self, key: Vec<u8>) -> Option<LogRecodPos> {
+        let mut result=None;
         let tx = self.tree.tx(true).expect("fail to create tx object");
         let bucket = tx.get_bucket(BPTREE_BUCKET_NAME).unwrap();
-        if let Err(e) = bucket.delete(key) {
-            if e == Error::BucketMissing {
-                return false;
-            }
+        if let Ok(kv) = bucket.delete(key) {
+            let pos=decode_log_record_pos(kv.value().to_vec());
+            result = Some(pos);
         }
         tx.commit().unwrap();
-        true
+        result
     }
 
     fn list_keys(&self) -> crate::errors::Result<Vec<Bytes>> {

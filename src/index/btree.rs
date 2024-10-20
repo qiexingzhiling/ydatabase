@@ -19,10 +19,9 @@ impl BTree {
 }
 
 impl Indexer for BTree {
-    fn put(&self, key: Vec<u8>, pos: LogRecodPos) -> bool {
+    fn put(&self, key: Vec<u8>, pos: LogRecodPos) -> Option<LogRecodPos> {
         let mut write_guard = self.tree.write();
-        write_guard.insert(key, pos);
-        true
+        write_guard.insert(key, pos)
     }
 
     fn get(&self, key: Vec<u8>) -> Option<LogRecodPos> {
@@ -30,9 +29,9 @@ impl Indexer for BTree {
         read_guard.get(&key).copied()
     }
 
-    fn delete(&self, key: Vec<u8>) -> bool {
+    fn delete(&self, key: Vec<u8>) -> Option<LogRecodPos> {
         let mut write_guard = self.tree.write();
-        write_guard.remove(&key).is_some()
+        write_guard.remove(&key)
     }
 
     fn list_keys(&self) -> crate::errors::Result<Vec<Bytes>> {
@@ -115,7 +114,7 @@ mod tests {
                 offset: 10,
             },
         );
-        assert_eq!(res, true);
+        assert_eq!(res.is_none(), true);
         let re1 = bt.put(
             "aa".as_bytes().to_vec(),
             LogRecodPos {
@@ -123,7 +122,7 @@ mod tests {
                 offset: 20,
             },
         );
-        assert_eq!(re1, true);
+        assert_eq!(re1.is_none(), true);
     }
     #[test]
     fn test_btree_get() {
@@ -135,7 +134,7 @@ mod tests {
                 offset: 10,
             },
         );
-        assert_eq!(res, true);
+        assert_eq!(res.is_some(), true);
         let re1 = bt.put(
             "aa".as_bytes().to_vec(),
             LogRecodPos {
@@ -143,7 +142,7 @@ mod tests {
                 offset: 20,
             },
         );
-        assert_eq!(re1, true);
+        assert_eq!(re1.is_some(), true);
 
         let pos1 = bt.get("aa".as_bytes().to_vec());
         //println!("{:?}", pos1);
@@ -174,9 +173,9 @@ mod tests {
             },
         );
         let res1 = bt.delete("".as_bytes().to_vec());
-        assert_eq!(res1, true);
+        assert_eq!(res1.is_some(), true);
         let res2 = bt.delete("aa".as_bytes().to_vec());
-        assert_eq!(res2, true);
+        assert_eq!(res2.is_some(), true);
     }
     #[test]
     fn test_btree_iterator_seek() {
