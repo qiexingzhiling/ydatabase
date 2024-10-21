@@ -212,3 +212,29 @@ fn test_engine_file_lock() {
 
     std::fs::remove_dir_all(opts.clone().dir_path).expect("failed to remove dir");
 }
+
+#[test]
+fn test_engine_stat() {
+    let mut opts = Options::default();
+    opts.dir_path = PathBuf::from("/tmp/bitcask-rs-stat");
+    let mut engine = Engine::open(opts.clone()).expect("failed to open engine");
+
+    for i in 0..=10000 {
+        let res = engine.put(get_test_key(i), get_test_value(i));
+        assert!(res.is_ok());
+    }
+    for i in 0..=1000 {
+        let res = engine.put(get_test_key(i), get_test_value(i));
+        assert!(res.is_ok());
+    }
+    for i in 2000..=5000 {
+        let res = engine.delete(get_test_key(i));
+        assert!(res.is_ok());
+    }
+
+    let stat = engine.stat().unwrap();
+    assert!(stat.reclaim_size > 0);
+
+    // 删除测试的文件夹
+    std::fs::remove_dir_all(opts.clone().dir_path).expect("failed to remove path");
+}

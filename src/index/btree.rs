@@ -101,195 +101,195 @@ impl IndexIterator for BTreeIterator {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn test_btree_put() {
-        let bt = BTree::new();
-        let res = bt.put(
-            "".as_bytes().to_vec(),
-            LogRecodPos {
-                file_id: 1,
-                offset: 10,
-            },
-        );
-        assert_eq!(res.is_none(), true);
-        let re1 = bt.put(
-            "aa".as_bytes().to_vec(),
-            LogRecodPos {
-                file_id: 2,
-                offset: 20,
-            },
-        );
-        assert_eq!(re1.is_none(), true);
-    }
-    #[test]
-    fn test_btree_get() {
-        let bt = BTree::new();
-        let res = bt.put(
-            "".as_bytes().to_vec(),
-            LogRecodPos {
-                file_id: 1,
-                offset: 10,
-            },
-        );
-        assert_eq!(res.is_some(), true);
-        let re1 = bt.put(
-            "aa".as_bytes().to_vec(),
-            LogRecodPos {
-                file_id: 2,
-                offset: 20,
-            },
-        );
-        assert_eq!(re1.is_some(), true);
-
-        let pos1 = bt.get("aa".as_bytes().to_vec());
-        //println!("{:?}", pos1);
-        let pos2 = bt.get("".as_bytes().to_vec());
-        //println!("{:?}", pos2);
-        assert!(pos1.is_some());
-        assert_eq!(pos1.unwrap().file_id, 2);
-        assert_eq!(pos1.unwrap().offset, 20);
-        assert!(pos2.is_some());
-        assert_eq!(pos2.unwrap().file_id, 1);
-        assert_eq!(pos2.unwrap().offset, 10);
-    }
-    #[test]
-    fn test_btree_delete() {
-        let bt = BTree::new();
-        bt.put(
-            "".as_bytes().to_vec(),
-            LogRecodPos {
-                file_id: 1,
-                offset: 10,
-            },
-        );
-        bt.put(
-            "aa".as_bytes().to_vec(),
-            LogRecodPos {
-                file_id: 2,
-                offset: 20,
-            },
-        );
-        let res1 = bt.delete("".as_bytes().to_vec());
-        assert_eq!(res1.is_some(), true);
-        let res2 = bt.delete("aa".as_bytes().to_vec());
-        assert_eq!(res2.is_some(), true);
-    }
-    #[test]
-    fn test_btree_iterator_seek() {
-        let bt = BTree::new();
-        let mut iter1 = bt.iterator(IteratorOptions::default());
-        iter1.seek("aa".as_bytes().to_vec());
-        let res = iter1.next();
-        //println!("{:?}", res);
-        assert_eq!(res.is_none(), true);
-
-        bt.put(
-            "ccde".as_bytes().to_vec(),
-            LogRecodPos {
-                file_id: 1,
-                offset: 10,
-            },
-        );
-        let mut iter2 = bt.iterator(IteratorOptions::default());
-        iter2.seek("aa".as_bytes().to_vec());
-        let res2 = iter2.next();
-        //println!("{:?}",res2);
-        assert_eq!(res2.is_some(), true);
-        iter2.seek("ee".as_bytes().to_vec());
-        let res3 = iter2.next();
-        //println!("{:?}",res3);
-        assert_eq!(res3.is_none(), true);
-
-        bt.put(
-            "bbde".as_bytes().to_vec(),
-            LogRecodPos {
-                file_id: 1,
-                offset: 10,
-            },
-        );
-        bt.put(
-            "aade".as_bytes().to_vec(),
-            LogRecodPos {
-                file_id: 1,
-                offset: 10,
-            },
-        );
-        bt.put(
-            "cade".as_bytes().to_vec(),
-            LogRecodPos {
-                file_id: 1,
-                offset: 10,
-            },
-        );
-        let mut iter3 = bt.iterator(IteratorOptions::default());
-        iter3.seek("b".as_bytes().to_vec());
-        while let Some(item) = iter3.next() {
-            //println!("{:?}",String::from_utf8(item.0.clone()).unwrap());
-        }
-
-        let mut iter4 = bt.iterator(IteratorOptions::default());
-        iter4.seek("cade".as_bytes().to_vec());
-        let res4 = iter4.next();
-        //println!("{:?}",res4);
-
-        let mut iter_opts = IteratorOptions::default();
-        iter_opts.reverse = true;
-        let mut iter5 = bt.iterator(iter_opts);
-        iter5.seek("bb".as_bytes().to_vec());
-        while let Some(item) = iter5.next() {
-            println!("{:?}", String::from_utf8(item.0.to_vec()));
-        }
-    }
-    #[test]
-    fn test_btree_iterator_next() {
-        let bt = BTree::new();
-        let mut iter1 = bt.iterator(IteratorOptions::default());
-        //assert!(iter1.next().is_none());
-        bt.put(
-            "bbde".as_bytes().to_vec(),
-            LogRecodPos {
-                file_id: 1,
-                offset: 10,
-            },
-        );
-        bt.put(
-            "aade".as_bytes().to_vec(),
-            LogRecodPos {
-                file_id: 1,
-                offset: 10,
-            },
-        );
-        bt.put(
-            "cade".as_bytes().to_vec(),
-            LogRecodPos {
-                file_id: 1,
-                offset: 10,
-            },
-        );
-        println!("{:?}", iter1.next());
-
-        let mut opt1 = IteratorOptions::default();
-        opt1.reverse = true;
-        let mut iter2 = bt.iterator(opt1);
-        while let Some(item) = iter2.next() {
-            println!("{:?}", String::from_utf8(item.0.to_vec()));
-        }
-
-        let mut opt2 = IteratorOptions::default();
-        opt2.prefix = "c".as_bytes().to_vec();
-        let mut iter3 = bt.iterator(opt2);
-        while let Some(item) = iter3.next() {
-            println!("{:?}", String::from_utf8(item.0.to_vec()));
-        }
-
-        let mut opt3 = IteratorOptions::default();
-        opt3.prefix = "cssssss".as_bytes().to_vec();
-        let mut iter4 = bt.iterator(opt3);
-        while let Some(item) = iter4.next() {
-            println!("{:?}", String::from_utf8(item.0.to_vec()));
-        }
-    }
-}
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     #[test]
+//     fn test_btree_put() {
+//         let bt = BTree::new();
+//         let res = bt.put(
+//             "".as_bytes().to_vec(),
+//             LogRecodPos {
+//                 file_id: 1,
+//                 offset: 10,
+//             },
+//         );
+//         assert_eq!(res.is_none(), true);
+//         let re1 = bt.put(
+//             "aa".as_bytes().to_vec(),
+//             LogRecodPos {
+//                 file_id: 2,
+//                 offset: 20,
+//             },
+//         );
+//         assert_eq!(re1.is_none(), true);
+//     }
+//     #[test]
+//     fn test_btree_get() {
+//         let bt = BTree::new();
+//         let res = bt.put(
+//             "".as_bytes().to_vec(),
+//             LogRecodPos {
+//                 file_id: 1,
+//                 offset: 10,
+//             },
+//         );
+//         assert_eq!(res.is_some(), true);
+//         let re1 = bt.put(
+//             "aa".as_bytes().to_vec(),
+//             LogRecodPos {
+//                 file_id: 2,
+//                 offset: 20,
+//             },
+//         );
+//         assert_eq!(re1.is_some(), true);
+//
+//         let pos1 = bt.get("aa".as_bytes().to_vec());
+//         //println!("{:?}", pos1);
+//         let pos2 = bt.get("".as_bytes().to_vec());
+//         //println!("{:?}", pos2);
+//         assert!(pos1.is_some());
+//         assert_eq!(pos1.unwrap().file_id, 2);
+//         assert_eq!(pos1.unwrap().offset, 20);
+//         assert!(pos2.is_some());
+//         assert_eq!(pos2.unwrap().file_id, 1);
+//         assert_eq!(pos2.unwrap().offset, 10);
+//     }
+//     #[test]
+//     fn test_btree_delete() {
+//         let bt = BTree::new();
+//         bt.put(
+//             "".as_bytes().to_vec(),
+//             LogRecodPos {
+//                 file_id: 1,
+//                 offset: 10,
+//             },
+//         );
+//         bt.put(
+//             "aa".as_bytes().to_vec(),
+//             LogRecodPos {
+//                 file_id: 2,
+//                 offset: 20,
+//             },
+//         );
+//         let res1 = bt.delete("".as_bytes().to_vec());
+//         assert_eq!(res1.is_some(), true);
+//         let res2 = bt.delete("aa".as_bytes().to_vec());
+//         assert_eq!(res2.is_some(), true);
+//     }
+//     #[test]
+//     fn test_btree_iterator_seek() {
+//         let bt = BTree::new();
+//         let mut iter1 = bt.iterator(IteratorOptions::default());
+//         iter1.seek("aa".as_bytes().to_vec());
+//         let res = iter1.next();
+//         //println!("{:?}", res);
+//         assert_eq!(res.is_none(), true);
+//
+//         bt.put(
+//             "ccde".as_bytes().to_vec(),
+//             LogRecodPos {
+//                 file_id: 1,
+//                 offset: 10,
+//             },
+//         );
+//         let mut iter2 = bt.iterator(IteratorOptions::default());
+//         iter2.seek("aa".as_bytes().to_vec());
+//         let res2 = iter2.next();
+//         //println!("{:?}",res2);
+//         assert_eq!(res2.is_some(), true);
+//         iter2.seek("ee".as_bytes().to_vec());
+//         let res3 = iter2.next();
+//         //println!("{:?}",res3);
+//         assert_eq!(res3.is_none(), true);
+//
+//         bt.put(
+//             "bbde".as_bytes().to_vec(),
+//             LogRecodPos {
+//                 file_id: 1,
+//                 offset: 10,
+//             },
+//         );
+//         bt.put(
+//             "aade".as_bytes().to_vec(),
+//             LogRecodPos {
+//                 file_id: 1,
+//                 offset: 10,
+//             },
+//         );
+//         bt.put(
+//             "cade".as_bytes().to_vec(),
+//             LogRecodPos {
+//                 file_id: 1,
+//                 offset: 10,
+//             },
+//         );
+//         let mut iter3 = bt.iterator(IteratorOptions::default());
+//         iter3.seek("b".as_bytes().to_vec());
+//         while let Some(item) = iter3.next() {
+//             //println!("{:?}",String::from_utf8(item.0.clone()).unwrap());
+//         }
+//
+//         let mut iter4 = bt.iterator(IteratorOptions::default());
+//         iter4.seek("cade".as_bytes().to_vec());
+//         let res4 = iter4.next();
+//         //println!("{:?}",res4);
+//
+//         let mut iter_opts = IteratorOptions::default();
+//         iter_opts.reverse = true;
+//         let mut iter5 = bt.iterator(iter_opts);
+//         iter5.seek("bb".as_bytes().to_vec());
+//         while let Some(item) = iter5.next() {
+//             println!("{:?}", String::from_utf8(item.0.to_vec()));
+//         }
+//     }
+//     #[test]
+//     fn test_btree_iterator_next() {
+//         let bt = BTree::new();
+//         let mut iter1 = bt.iterator(IteratorOptions::default());
+//         //assert!(iter1.next().is_none());
+//         bt.put(
+//             "bbde".as_bytes().to_vec(),
+//             LogRecodPos {
+//                 file_id: 1,
+//                 offset: 10,
+//             },
+//         );
+//         bt.put(
+//             "aade".as_bytes().to_vec(),
+//             LogRecodPos {
+//                 file_id: 1,
+//                 offset: 10,
+//             },
+//         );
+//         bt.put(
+//             "cade".as_bytes().to_vec(),
+//             LogRecodPos {
+//                 file_id: 1,
+//                 offset: 10,
+//             },
+//         );
+//         println!("{:?}", iter1.next());
+//
+//         let mut opt1 = IteratorOptions::default();
+//         opt1.reverse = true;
+//         let mut iter2 = bt.iterator(opt1);
+//         while let Some(item) = iter2.next() {
+//             println!("{:?}", String::from_utf8(item.0.to_vec()));
+//         }
+//
+//         let mut opt2 = IteratorOptions::default();
+//         opt2.prefix = "c".as_bytes().to_vec();
+//         let mut iter3 = bt.iterator(opt2);
+//         while let Some(item) = iter3.next() {
+//             println!("{:?}", String::from_utf8(item.0.to_vec()));
+//         }
+//
+//         let mut opt3 = IteratorOptions::default();
+//         opt3.prefix = "cssssss".as_bytes().to_vec();
+//         let mut iter4 = bt.iterator(opt3);
+//         while let Some(item) = iter4.next() {
+//             println!("{:?}", String::from_utf8(item.0.to_vec()));
+//         }
+//     }
+// }

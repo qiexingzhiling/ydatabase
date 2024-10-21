@@ -39,6 +39,13 @@ pub struct Engine {
     pub(crate) bytes_write: Arc<AtomicUsize>,
     pub(crate) reclaim_size: Arc<AtomicUsize>,
 }
+
+pub struct Stat {
+    key_num: usize,
+    data_file_num: usize,
+    pub(crate) reclaim_size: usize,
+    disk_size:u64,
+}
 const INITIAL_FILE_ID: u32 = 0;
 
 impl Engine {
@@ -160,6 +167,19 @@ impl Engine {
         let read_guard = self.active_file.read();
         read_guard.sync()
     }
+
+    pub fn stat(&mut self)->Result<Stat> {
+        let keys=self.list_keys().unwrap();
+        let older_files=self.older_file.read();
+        Ok(
+            Stat{
+                key_num: keys.len(),
+                data_file_num: keys.len()+1,
+                reclaim_size: self.reclaim_size.load(Ordering::SeqCst),
+                disk_size: 0,
+            }
+        )
+    }
     pub fn put(&self, key: Bytes, value: Bytes) -> Result<()> {
         if key.is_empty() {
             return Err(Errors::KeyIsEmpty);
@@ -171,10 +191,12 @@ impl Engine {
         };
 
         let log_record_pos = self.append_log_record(&mut record)?;
-        
+
         if let Some(old_pos)=self.index.put(key.to_vec(),log_record_pos) {
-            self.reclaim_size.fetch_add(old_pos.size as usize, Ordering::SeqCst);
+            self.reclaim_size
+                .fetch_add(old_pos.size as usize, Ordering::SeqCst);
         }
+
         
         Ok(())
     }
@@ -258,6 +280,7 @@ impl Engine {
         }
         Ok(log_record.value.into())
     }
+
     pub(crate) fn append_log_record(&self, log_record: &mut LogRecord) -> Result<LogRecodPos> {
         let dir_path = self.option.dir_path.clone();
         let enc_record = log_record.encode();
@@ -389,10 +412,16 @@ impl Engine {
     }
     fn update_index(&self, key: Vec<u8>, log_recod_type: LogRecodType, pos: LogRecodPos) {
         if log_recod_type == LogRecodType::NORMAL {
-            self.index.put(key.clone(), pos);
+            if let Some(old_pos)=self.index.put(key.clone(), pos){
+                self.reclaim_size.fetch_add(old_pos.size as usize, Ordering::SeqCst);
+            }
         }
         if log_recod_type == LogRecodType::DELETED {
-            self.index.delete(key);
+            let mut size=pos.size;
+            if let Some(old_pos)=self.index.delete(key) {
+                size+=old_pos.size;
+            }
+            self.reclaim_size.fetch_add(size as usize,Ordering::SeqCst);
         }
     }
 
@@ -482,5 +511,10 @@ fn check_options(opts: &Options) -> Option<Errors> {
     if opts.data_file_size <= 0 {
         return Some(Errors::DataFileIsEmpty);
     }
+
+    if opts.data_file_merge_ratio<0 as f32 || opts.data_file_merge_ratio>1 as f32 {
+        return Some(Errors::DataFileMergeRatioIsInvalid);
+    }
+
     None
 }

@@ -43,5 +43,11 @@ pub enum Errors {
     CanNotUseWriteBatch,
     #[error("database is using")]
     DataBaseIsUsing,
+    #[error("data file merge ratio is invalid")]
+    DataFileMergeRatioIsInvalid,
+    #[error("can not merge now")]
+    CanNotMerge,
+    #[error("Disk Capatity is not enough")]
+    NoEnoughDiskCapacity,
 }
 pub type Result<T> = result::Result<T, Errors>;

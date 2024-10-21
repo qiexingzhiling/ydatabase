@@ -7,6 +7,7 @@ pub struct Options {
     pub bytes_per_sync: usize,
     pub index_type: IndexType,
     pub mmap_at_startup: bool,
+    pub data_file_merge_ratio:f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -27,6 +28,7 @@ impl Default for Options {
             bytes_per_sync: 0,
             index_type: IndexType::BTree,
             mmap_at_startup: true,
+            data_file_merge_ratio: 0.5,
         }
     }
 }
