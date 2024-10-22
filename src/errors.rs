@@ -49,5 +49,7 @@ pub enum Errors {
     CanNotMerge,
     #[error("Disk Capatity is not enough")]
     NoEnoughDiskCapacity,
+    #[error("fail to copy dirctory")]
+    FailToCopyDirectory,
 }
 pub type Result<T> = result::Result<T, Errors>;

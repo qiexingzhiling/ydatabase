@@ -20,3 +20,8 @@ jammdb = "0.11.0"
 fs2 = "0.4.3"
 memmap2 = "0.9.5"
 fs_extra = "1.3.0"
+
+[workspace]
+members = [
+    "http"
+]

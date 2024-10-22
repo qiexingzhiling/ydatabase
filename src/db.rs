@@ -6,7 +6,7 @@ use crate::errors::{Errors, Result};
 use crate::merge::load_merge_files;
 use crate::options::IOType::{MemoryMap, StandardIO};
 use crate::options::{IOType, IndexType, Options};
-use crate::{index, options};
+use crate::{index, options, util};
 use bytes::Bytes;
 use fs2::FileExt;
 use jammdb::Data;
@@ -166,6 +166,15 @@ impl Engine {
     pub fn sync(&self) -> Result<()> {
         let read_guard = self.active_file.read();
         read_guard.sync()
+    }
+
+    pub fn backup(&self,dir_path:PathBuf)->Result<()> {
+        let exclude=[FILE_LOCK_NAME];
+        if let Err(e)=util::file::copy_dir(self.option.dir_path.clone(),dir_path.to_path_buf(),&exclude) {
+            log::error!("backup err:{}", e);
+            return Err(Errors::FailToCopyDirectory);
+        }
+        Ok(())
     }
 
     pub fn stat(&mut self)->Result<Stat> {
